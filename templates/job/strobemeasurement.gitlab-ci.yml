@@ -1,0 +1,210 @@
+#BMC AMI Strobe (Strobe), the leading mainframe application performance management solution, is #traditionally used by Operations teams to pinpoint and resolve application performance problems found #in production. The shift left approach for testing allows development teams to conduct tests earlier #in the cycle. The template allows Gitlab users to setup automated Strobe measurements and get custom #callback notifications when complete.
+#Prerequisites
+#The following are required to use this template:
+
+#Giltab Account
+
+#BMC AMI Strobe (Strobe) license
+
+#BMC AMI Common Configuration Gitlab Template(Configure with required configurations)
+
+#An installation of BMC AMI Common Enterprise Services (CES) with Strobe installed.
+
+#Note: You need CES version 20.02.xx or later to use the notification callback. This version will also #utilize the INITBY of the CI (Continuous Integration) identifier, which will allow BMC AMI DevX #Adviser to track this activity. This plugin can still submit measurements using earlier CES versions. #Strobe 18.02 PTF SBG422A is required for the INITBY of CI.
+
+#You can include this template in your existing .gitlab-ci.yml` by using INCLUDE keyword.
+#You can copy paste this content from this template to your .gitlab-ci.yml` file.
+#Configuration
+#In CES, perform the following steps:
+
+#a. Navigate to the Host Connections page and define the host connection that is connected to your #Strobe installation.
+
+#b. Navigate to the Security page and define a Personal Access Token for this host connection.
+
+#Note: Strobe on the mainframe can have difficulty determining the correct CES host. So you might need #to set the ces.host.address property to the CES host location in ces.properties located at data/ces/#config in the CES installation directory. For example, ces.host.address=127.0.0.1 or ces.host.#address=localhost
+
+#Go to Jenkins system > Jenkins > Manage Jenkins > Configure System > Common Configurations > Host #Connections section. In the Host Connections section, add the same host connection as defined in CES, #while ensuring the following:
+
+#-	Make sure that description field matches the description in CES.
+#-	Add the CES URL in the format scheme://host:port    e.g. https://myHost:48226
+#- In gitlab pipeline variables add Personal Access Token from step 1 as secret text.
+# Executing a Measurement
+# Pass below parameters to this job template from a pipeline
+# $REQUEST_TYPE
+# $JOB_NAME
+# $SYSTEM
+# $TAGS
+# $PROFILE
+# $EMAIL
+# $DURATION
+# $SAMPLES
+# $LIMIT
+# $HLQ
+# $TRANSACTION_ID
+# $FINAL_ACTION
+
+.strobemeasurement:
+  stage: $jobstage
+  script:
+    - |
+      try {
+      echo "Started: Strobe Measurement JOB"
+      Write-Host $selectedHostName
+      $ces_url = $null
+      $selectedHost = $null
+      $js = Get-Content $HOST_CONNECTIONS | ConvertFrom-Json
+      $finalJsonBody = $null
+      foreach ($elem in $js.hostconnections) {
+          if ($elem.description -eq $selectedHostName) {
+              $selectedHost = $elem
+              $ces_url = $elem.ces_url
+              break
+          }
+      }
+      $jsonBody = @{
+          "reqType" = $requestType
+          "jobName" = $jobName
+          "system" = $system
+          "tags" = $tags
+          "profileName" = $profile
+          "emailto" = $email
+          "duration" = $duration
+          "samples" = $SAMPLES
+          "limit" = $limit
+          "hlq" = $hlq
+          "tranid" = $transactionid
+          "initBy" = "CI"
+          "finalAction" = $finalAction
+      }
+      if ($url -ne $null -and -not [string]::IsNullOrEmpty($url)) {
+          $apiNotificationData = @{
+              "method" = $method
+              "returnURL" = $returnURL
+              "httpHeaders" = $httpHeaders
+              "body" = $body
+              "triggerType" = 0
+              "events" = "*"
+              "productID" = "STROBE"
+              "productInstance" = "strobe"
+              "resource" = ""
+          }
+          $jsonBodyWithNotification = $jsonBody
+          $jsonBodyWithNotification.apiNotificationData = $apiNotificationData
+          $finalJsonBody = $jsonBodyWithNotification | ConvertTo-Json -Depth 4
+      } else {
+          $finalJsonBody = $jsonBody | ConvertTo-Json -Depth 4
+      }
+      Write-Host $finalJsonBody
+      $ces_url += "/strobe/measurement";
+      # post request to ces server for creating strobe measurement.
+      $response = Invoke-WebRequest -Method Post -ContentType application/json `
+          -Headers @{ "Authorization" = $ces_secret_token } `
+          -HttpVersion 3.0 `
+          -Uri $ces_url `
+          -Body $finalJsonBody
+      Write-Host $response
+      if ($response -ne $null) {
+          $strobeResponse=$response -replace '@', '' | ConvertFrom-Json
+          Write-Host "Response Code: " + $strobeResponse.returnCode
+          if($strobeResponse.returnCode -lt 0 ){
+             Write-Host "Strobe Measurement Job Failed!!!"
+             exit 1
+          }
+          else{
+             Write-Host "Strobe Measurement Job Finished Successfully!!!"
+          }
+
+        }
+      }catch{
+           $errorRecord = $_.Exception
+           $errorMessage = $errorRecord.Message
+           $errorLineNumber = $errorRecord.InvocationInfo.ScriptLineNumber
+           Write-Host "An error occurred: $errorMessage"
+           Write-Host "An error occurred. line: $errorLineNumber"
+           exit 1
+          }
+
+
+.strobemeasurementlinux:
+    stage: $jobstage
+    script: 
+        - |
+          failure() {
+          local lineno=$1
+          local msg=$2
+          echo "Failed at $lineno: $msg"
+          }
+          trap 'failure ${LINENO} "$BASH_COMMAND"' ERR
+          set -eE -o functrace
+          echo "Started Strobe Measurement JOB Linux"
+          if command -v jq &>/dev/null; then
+             echo "jq is installed."
+          else
+             echo y | apt update
+             echo y | apt-get install jq
+          fi
+          selectedHostName=$selectedHostName
+          ces_url=""
+          selectedHost=""
+          ces_url=$(jq -r -c '.hostconnections[] | select(.description=="'$selectedHostName'") | .ces_url' $HOST_CONNECTIONS)
+          echo $ces_url
+          finalJsonBody=""
+          jsonBody='{
+          "reqType": "'"$requestType"'",
+          "jobName": "'"$jobName"'",
+          "system" : "'"$system"'",
+          "tags" : "'"$tags"'",
+          "profileName" : "'"$profile"'",
+          "emailto" : "'"$email"'",
+          "duration" : "'"$duration"'",
+          "samples" : "'"$SAMPLES"'",
+          "limit" : "'"$limit"'",
+          "hlq" : "'"$hlq"'",
+          "tranid" : "'"$transactionid"'",
+          "initBy" : "CI",
+          "finalAction" : "'"$finalAction"'"
+          }'
+
+          if [ -n "$url" ] && [ ! -z "$url" ]; then
+             echo "Preparing notification data"
+             apiNotificationData='{
+             "method": "'"$method"'",
+             "returnURL": "'"$returnURL"'",
+              "httpHeaders" : "'"$httpHeaders"'",
+              "body" : "'"$body"'",
+              "triggerType" : 0,
+              "events" : "*",
+              "productID" : "STROBE",
+              "productInstance" : "strobe",
+              "resource" : ""
+              }'
+              jsonBodyWithNotification=$(echo "$jsonBody" | jq --argjson apiNotificationData "$apiNotificationData" '. + { apiNotificationData: $apiNotificationData }')
+              echo $jsonBodyWithNotification
+              finalJsonBody=$(echo "$jsonBodyWithNotification" | jq -c --indent 4 '.')
+          else
+            finalJsonBody=$(echo "$jsonBody" | jq -c --indent 4 '.')
+          fi
+          echo "$finalJsonBody"
+          ces_url+="/strobe/measurement"
+          response=$(curl -X POST -H "Content-Type: application/json" -H "Authorization: 
+          $ces_secret_token" --http1.0 -d "$finalJsonBody" "$ces_url")
+          echo "$response"
+          if [ -n "$response" ]; then
+             echo "Response is not null"
+             returnCode=$(echo "$response" | jq -r '.returnCode')
+             #statusNumber=$(echo "$response" | jq -r '.statusList.status["@number"]')
+             messageList=$(echo "$response" | jq -r '.messageList.message[]')
+          fi
+          echo "$returnCode"
+          if [ "$returnCode" -lt 0 ]; then
+            echo "$returnCode"
+            echo "$messageList"
+            echo "Strobe Measurement Job Failed!!!"
+            exit 1
+          else
+            echo "$returnCode"
+            echo "$messageList"
+            echo "Strobe Measurement Job Finished Successfully!!!"
+          fi
+
+        
