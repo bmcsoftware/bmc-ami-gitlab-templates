@@ -6,8 +6,6 @@
 
 #BMC AMI Strobe (Strobe) license
 
-#BMC AMI Common Configuration Gitlab Template(Configure with required configurations)
-
 #An installation of BMC AMI Common Enterprise Services (CES) with Strobe installed.
 
 #Note: You need CES version 20.02.xx or later to use the notification callback. This version will also #utilize the INITBY of the CI (Continuous Integration) identifier, which will allow BMC AMI DevX #Adviser to track this activity. This plugin can still submit measurements using earlier CES versions. #Strobe 18.02 PTF SBG422A is required for the INITBY of CI.
